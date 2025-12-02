@@ -1,0 +1,350 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cls-system
+  labels:
+    name: cls-system
+    environment: production
+    platform: aws
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cls-backend-sa
+  namespace: cls-system
+  labels:
+    app: cls-backend
+  # Note: EKS Pod Identity does not require annotations on the service account
+  # The pod identity association is created separately via AWS CLI:
+  # aws eks create-pod-identity-association --cluster-name cls-backend-cluster \
+  #   --namespace cls-system --service-account cls-backend-sa \
+  #   --role-arn arn:aws:iam::<ACCOUNT_ID>:role/CLSBackendRole
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cls-backend-config
+  namespace: cls-system
+  labels:
+    app: cls-backend
+data:
+  # Messaging Configuration
+  MESSAGING_PROVIDER: "aws"
+  AWS_USE_IAM_ROLE: "true"
+
+  # Application Configuration
+  LOG_LEVEL: "info"
+  LOG_FORMAT: "json"
+  ENVIRONMENT: "production"
+  PORT: "8080"
+  METRICS_PORT: "8081"
+
+  # Reconciliation Configuration
+  RECONCILIATION_ENABLED: "true"
+  RECONCILIATION_CHECK_INTERVAL: "1m"
+  RECONCILIATION_HEALTHY_INTERVAL: "5m"
+  RECONCILIATION_UNHEALTHY_INTERVAL: "30s"
+
+  # Aggregation Configuration
+  AGGREGATION_ENABLED: "true"
+  AGGREGATION_INTERVAL: "30s"
+
+  # CORS Configuration
+  CORS_ALLOWED_ORIGINS: "*"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cls-backend-secrets
+  namespace: cls-system
+  labels:
+    app: cls-backend
+type: Opaque
+stringData:
+  # Replace these with actual values
+  DATABASE_URL: "postgres://clsadmin:CHANGEME@cls-db.xxxx.us-east-1.rds.amazonaws.com:5432/cls?sslmode=require"
+  AWS_REGION: "us-east-1"
+  AWS_SNS_CLUSTER_EVENTS_TOPIC_ARN: "arn:aws:sns:us-east-1:123456789012:cluster-events"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cls-backend
+  namespace: cls-system
+  labels:
+    app: cls-backend
+    version: v1
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: cls-backend
+  template:
+    metadata:
+      labels:
+        app: cls-backend
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: cls-backend-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: cls-backend
+        image: <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cls-backend:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: metrics
+          containerPort: 8081
+          protocol: TCP
+        env:
+        # Messaging Provider Configuration
+        - name: MESSAGING_PROVIDER
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: MESSAGING_PROVIDER
+        - name: AWS_USE_IAM_ROLE
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: AWS_USE_IAM_ROLE
+
+        # AWS Configuration (from secrets)
+        - name: AWS_REGION
+          valueFrom:
+            secretKeyRef:
+              name: cls-backend-secrets
+              key: AWS_REGION
+        - name: AWS_SNS_CLUSTER_EVENTS_TOPIC_ARN
+          valueFrom:
+            secretKeyRef:
+              name: cls-backend-secrets
+              key: AWS_SNS_CLUSTER_EVENTS_TOPIC_ARN
+
+        # Database Configuration
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: cls-backend-secrets
+              key: DATABASE_URL
+
+        # Application Configuration (from configmap)
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: LOG_LEVEL
+        - name: LOG_FORMAT
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: LOG_FORMAT
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: ENVIRONMENT
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: PORT
+        - name: METRICS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: METRICS_PORT
+
+        # Reconciliation Configuration
+        - name: RECONCILIATION_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: RECONCILIATION_ENABLED
+        - name: RECONCILIATION_CHECK_INTERVAL
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: RECONCILIATION_CHECK_INTERVAL
+        - name: RECONCILIATION_HEALTHY_INTERVAL
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: RECONCILIATION_HEALTHY_INTERVAL
+        - name: RECONCILIATION_UNHEALTHY_INTERVAL
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: RECONCILIATION_UNHEALTHY_INTERVAL
+
+        # Aggregation Configuration
+        - name: AGGREGATION_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: AGGREGATION_ENABLED
+        - name: AGGREGATION_INTERVAL
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: AGGREGATION_INTERVAL
+
+        # CORS Configuration
+        - name: CORS_ALLOWED_ORIGINS
+          valueFrom:
+            configMapKeyRef:
+              name: cls-backend-config
+              key: CORS_ALLOWED_ORIGINS
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cls-backend
+  namespace: cls-system
+  labels:
+    app: cls-backend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    app: cls-backend
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cls-backend-metrics
+  namespace: cls-system
+  labels:
+    app: cls-backend
+    metrics: "true"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8081
+    targetPort: metrics
+    protocol: TCP
+    name: metrics
+  selector:
+    app: cls-backend
+
+---
+# Optional: HorizontalPodAutoscaler for automatic scaling
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cls-backend-hpa
+  namespace: cls-system
+  labels:
+    app: cls-backend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cls-backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 2
+        periodSeconds: 15
+      selectPolicy: Max
+
+---
+# Optional: PodDisruptionBudget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cls-backend-pdb
+  namespace: cls-system
+  labels:
+    app: cls-backend
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: cls-backend

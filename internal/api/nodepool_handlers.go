@@ -5,8 +5,8 @@ import (
 	"strconv"
 
 	"github.com/apahim/cls-backend/internal/database"
+	"github.com/apahim/cls-backend/internal/messaging"
 	"github.com/apahim/cls-backend/internal/models"
-	"github.com/apahim/cls-backend/internal/pubsub"
 	"github.com/apahim/cls-backend/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -16,15 +16,15 @@ import (
 // NodePoolHandler handles nodepool-related HTTP requests
 type NodePoolHandler struct {
 	repository *database.Repository
-	pubsub     *pubsub.Service
+	messaging  messaging.Provider
 	logger     *utils.Logger
 }
 
 // NewNodePoolHandler creates a new nodepool handler
-func NewNodePoolHandler(repository *database.Repository, pubsubService *pubsub.Service) *NodePoolHandler {
+func NewNodePoolHandler(repository *database.Repository, messagingProvider messaging.Provider) *NodePoolHandler {
 	return &NodePoolHandler{
 		repository: repository,
-		pubsub:     pubsubService,
+		messaging:  messagingProvider,
 		logger:     utils.NewLogger("nodepool_handler"),
 	}
 }
@@ -135,8 +135,8 @@ func (h *NodePoolHandler) CreateNodePool(c *gin.Context) {
 	}
 
 	// Publish nodepool created event
-	if h.pubsub != nil && h.pubsub.IsRunning() {
-		if err := h.pubsub.GetPublisher().PublishNodePoolCreated(ctx, &req); err != nil {
+	if h.messaging != nil && h.messaging.IsRunning() {
+		if err := h.messaging.GetPublisher().(messaging.Publisher).PublishNodePoolCreated(ctx, &req); err != nil {
 			h.logger.Warn("Failed to publish nodepool created event",
 				zap.String("nodepool_id", req.ID.String()),
 				zap.Error(err),
@@ -368,8 +368,8 @@ func (h *NodePoolHandler) UpdateNodePool(c *gin.Context) {
 	}
 
 	// Publish nodepool updated event if there were changes
-	if len(changes) > 0 && h.pubsub != nil && h.pubsub.IsRunning() {
-		if err := h.pubsub.GetPublisher().PublishNodePoolUpdated(ctx, &req); err != nil {
+	if len(changes) > 0 && h.messaging != nil && h.messaging.IsRunning() {
+		if err := h.messaging.GetPublisher().(messaging.Publisher).PublishNodePoolUpdated(ctx, &req); err != nil {
 			h.logger.Warn("Failed to publish nodepool updated event",
 				zap.String("nodepool_id", req.ID.String()),
 				zap.Error(err),
@@ -461,8 +461,8 @@ func (h *NodePoolHandler) DeleteNodePool(c *gin.Context) {
 	}
 
 	// Publish nodepool deleted event
-	if h.pubsub != nil && h.pubsub.IsRunning() {
-		if err := h.pubsub.GetPublisher().PublishNodePoolDeleted(ctx, nodepool); err != nil {
+	if h.messaging != nil && h.messaging.IsRunning() {
+		if err := h.messaging.GetPublisher().(messaging.Publisher).PublishNodePoolDeleted(ctx, nodepool); err != nil {
 			h.logger.Warn("Failed to publish nodepool deleted event",
 				zap.String("nodepool_id", nodepool.ID.String()),
 				zap.Error(err),

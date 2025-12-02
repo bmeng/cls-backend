@@ -7,8 +7,8 @@ import (
 
 	"github.com/apahim/cls-backend/internal/config"
 	"github.com/apahim/cls-backend/internal/database"
+	"github.com/apahim/cls-backend/internal/messaging"
 	"github.com/apahim/cls-backend/internal/models"
-	"github.com/apahim/cls-backend/internal/pubsub"
 	"github.com/apahim/cls-backend/internal/utils"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -17,7 +17,7 @@ import (
 // Scheduler manages periodic reconciliation of clusters
 type Scheduler struct {
 	repository *database.Repository
-	publisher  *pubsub.Publisher
+	publisher  messaging.Publisher
 	config     *config.ReconciliationConfig
 	logger     *utils.Logger
 
@@ -29,7 +29,7 @@ type Scheduler struct {
 }
 
 // NewScheduler creates a new reconciliation scheduler
-func NewScheduler(repository *database.Repository, publisher *pubsub.Publisher, cfg *config.ReconciliationConfig) *Scheduler {
+func NewScheduler(repository *database.Repository, publisher messaging.Publisher, cfg *config.ReconciliationConfig) *Scheduler {
 	if cfg == nil {
 		// Provide simplified default values - binary state model handles intervals in database
 		defaultConfig := &config.ReconciliationConfig{

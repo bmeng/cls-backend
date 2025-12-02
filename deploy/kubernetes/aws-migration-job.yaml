@@ -1,0 +1,91 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cls-backend-migration
+  namespace: cls-system
+  labels:
+    app: cls-backend
+    component: migration
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: cls-backend
+        component: migration
+    spec:
+      serviceAccountName: cls-backend-sa
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      initContainers:
+      - name: wait-for-db
+        image: postgres:15
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h $(echo $DATABASE_URL | sed -n 's|.*@\([^:]*\):.*|\1|p') -U $(echo $DATABASE_URL | sed -n 's|.*://\([^:]*\):.*|\1|p'); do
+            echo "Waiting for database to be ready..."
+            sleep 2
+          done
+          echo "Database is ready!"
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: cls-backend-secrets
+              key: DATABASE_URL
+      containers:
+      - name: migration
+        image: <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cls-backend:latest
+        imagePullPolicy: Always
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            echo "Running database migrations..."
+
+            # Extract database credentials from DATABASE_URL
+            DB_HOST=$(echo $DATABASE_URL | sed -n 's|.*@\([^:]*\):.*|\1|p')
+            DB_PORT=$(echo $DATABASE_URL | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
+            DB_NAME=$(echo $DATABASE_URL | sed -n 's|.*/\([^?]*\).*|\1|p')
+            DB_USER=$(echo $DATABASE_URL | sed -n 's|.*://\([^:]*\):.*|\1|p')
+
+            # Install psql if not available
+            if ! command -v psql &> /dev/null; then
+              echo "Installing PostgreSQL client..."
+              apt-get update && apt-get install -y postgresql-client
+            fi
+
+            # Run migrations
+            echo "Applying migrations to $DB_NAME on $DB_HOST..."
+            psql "$DATABASE_URL" -f /app/internal/database/migrations/001_complete_schema.sql
+
+            if [ $? -eq 0 ]; then
+              echo "Migrations completed successfully!"
+            else
+              echo "Migration failed!"
+              exit 1
+            fi
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: cls-backend-secrets
+              key: DATABASE_URL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL

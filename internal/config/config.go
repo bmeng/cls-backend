@@ -12,7 +12,8 @@ import (
 type Config struct {
 	Server        ServerConfig
 	Database      DatabaseConfig
-	PubSub        PubSubConfig
+	PubSub        PubSubConfig        // Deprecated: Use Messaging instead
+	Messaging     MessagingConfig     // New unified messaging configuration
 	Logging       LoggingConfig
 	Auth          AuthConfig
 	Reconciliation ReconciliationConfig
@@ -96,6 +97,37 @@ type AuthConfig struct {
 	Enabled bool `mapstructure:"enabled"`
 }
 
+// MessagingConfig holds unified messaging configuration for both GCP and AWS
+type MessagingConfig struct {
+	Provider string `mapstructure:"provider"` // "gcp" or "aws"
+
+	// GCP-specific configuration
+	GCP GCPMessagingConfig
+
+	// AWS-specific configuration
+	AWS AWSMessagingConfig
+}
+
+// GCPMessagingConfig holds GCP Pub/Sub configuration
+type GCPMessagingConfig struct {
+	ProjectID              string `mapstructure:"project_id"`
+	ClusterEventsTopic     string `mapstructure:"cluster_events_topic"`
+	EmulatorHost           string `mapstructure:"emulator_host"`
+	CredentialsFile        string `mapstructure:"credentials_file"`
+	MaxConcurrentHandlers  int    `mapstructure:"max_concurrent_handlers"`
+	MaxOutstandingMessages int    `mapstructure:"max_outstanding_messages"`
+}
+
+// AWSMessagingConfig holds AWS SNS+SQS configuration
+type AWSMessagingConfig struct {
+	Region                string `mapstructure:"region"`
+	ClusterEventsTopicARN string `mapstructure:"cluster_events_topic_arn"`
+	AccessKeyID           string `mapstructure:"access_key_id"`
+	SecretAccessKey       string `mapstructure:"secret_access_key"`
+	SessionToken          string `mapstructure:"session_token"`
+	UseIAMRole            bool   `mapstructure:"use_iam_role"`
+}
+
 
 // Load loads configuration from environment variables with defaults
 func Load() (*Config, error) {
@@ -123,6 +155,25 @@ func Load() (*Config, error) {
 			CredentialsFile:        getEnv("GOOGLE_APPLICATION_CREDENTIALS", ""),
 			MaxConcurrentHandlers:  getIntEnv("PUBSUB_MAX_CONCURRENT_HANDLERS", 10),
 			MaxOutstandingMessages: getIntEnv("PUBSUB_MAX_OUTSTANDING_MESSAGES", 100),
+		},
+		Messaging: MessagingConfig{
+			Provider: getEnv("MESSAGING_PROVIDER", "gcp"), // Default to GCP for backward compatibility
+			GCP: GCPMessagingConfig{
+				ProjectID:              getEnv("GOOGLE_CLOUD_PROJECT", ""),
+				ClusterEventsTopic:     getEnv("PUBSUB_CLUSTER_EVENTS_TOPIC", "cluster-events"),
+				EmulatorHost:           getEnv("PUBSUB_EMULATOR_HOST", ""),
+				CredentialsFile:        getEnv("GOOGLE_APPLICATION_CREDENTIALS", ""),
+				MaxConcurrentHandlers:  getIntEnv("PUBSUB_MAX_CONCURRENT_HANDLERS", 10),
+				MaxOutstandingMessages: getIntEnv("PUBSUB_MAX_OUTSTANDING_MESSAGES", 100),
+			},
+			AWS: AWSMessagingConfig{
+				Region:                getEnv("AWS_REGION", "us-east-1"),
+				ClusterEventsTopicARN: getEnv("AWS_SNS_CLUSTER_EVENTS_TOPIC_ARN", ""),
+				AccessKeyID:           getEnv("AWS_ACCESS_KEY_ID", ""),
+				SecretAccessKey:       getEnv("AWS_SECRET_ACCESS_KEY", ""),
+				SessionToken:          getEnv("AWS_SESSION_TOKEN", ""),
+				UseIAMRole:            getBoolEnv("AWS_USE_IAM_ROLE", true), // Default to IAM role for security
+			},
 		},
 		Logging: LoggingConfig{
 			Level:  getEnv("LOG_LEVEL", "info"),
@@ -175,10 +226,36 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("DATABASE_URL is required")
 	}
 
-	if c.PubSub.ProjectID == "" {
-		return fmt.Errorf("GOOGLE_CLOUD_PROJECT is required")
+	// Validate messaging configuration based on provider
+	switch c.Messaging.Provider {
+	case "gcp":
+		if c.Messaging.GCP.ProjectID == "" {
+			return fmt.Errorf("GOOGLE_CLOUD_PROJECT is required when MESSAGING_PROVIDER=gcp")
+		}
+		if c.Messaging.GCP.ClusterEventsTopic == "" {
+			return fmt.Errorf("PUBSUB_CLUSTER_EVENTS_TOPIC is required when MESSAGING_PROVIDER=gcp")
+		}
+	case "aws":
+		if c.Messaging.AWS.Region == "" {
+			return fmt.Errorf("AWS_REGION is required when MESSAGING_PROVIDER=aws")
+		}
+		if c.Messaging.AWS.ClusterEventsTopicARN == "" {
+			return fmt.Errorf("AWS_SNS_CLUSTER_EVENTS_TOPIC_ARN is required when MESSAGING_PROVIDER=aws")
+		}
+		// Validate AWS credentials only if not using IAM role
+		if !c.Messaging.AWS.UseIAMRole {
+			if c.Messaging.AWS.AccessKeyID == "" || c.Messaging.AWS.SecretAccessKey == "" {
+				return fmt.Errorf("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required when AWS_USE_IAM_ROLE=false")
+			}
+		}
+	default:
+		return fmt.Errorf("invalid MESSAGING_PROVIDER: %s (must be 'gcp' or 'aws')", c.Messaging.Provider)
 	}
 
+	// Backward compatibility: validate PubSub config if still using old path
+	if c.PubSub.ProjectID == "" && c.Messaging.Provider == "gcp" {
+		return fmt.Errorf("GOOGLE_CLOUD_PROJECT is required")
+	}
 
 	return nil
 }

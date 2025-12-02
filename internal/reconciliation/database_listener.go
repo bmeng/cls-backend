@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/apahim/cls-backend/internal/config"
+	"github.com/apahim/cls-backend/internal/messaging"
 	"github.com/apahim/cls-backend/internal/models"
-	"github.com/apahim/cls-backend/internal/pubsub"
 	"github.com/apahim/cls-backend/internal/utils"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -28,7 +28,7 @@ type DatabaseChangeNotification struct {
 // DatabaseChangeListener listens for database change notifications and triggers reconciliation
 type DatabaseChangeListener struct {
 	dbConfig   *config.DatabaseConfig
-	publisher  *pubsub.Publisher
+	publisher  messaging.Publisher
 	logger     *utils.Logger
 	conn       *pgx.Conn
 	running    bool
@@ -42,7 +42,7 @@ type DatabaseChangeListener struct {
 }
 
 // NewDatabaseChangeListener creates a new database change listener
-func NewDatabaseChangeListener(dbConfig *config.DatabaseConfig, publisher *pubsub.Publisher) *DatabaseChangeListener {
+func NewDatabaseChangeListener(dbConfig *config.DatabaseConfig, publisher messaging.Publisher) *DatabaseChangeListener {
 	return &DatabaseChangeListener{
 		dbConfig:      dbConfig,
 		publisher:     publisher,

@@ -7,7 +7,7 @@ import (
 
 	"github.com/apahim/cls-backend/internal/config"
 	"github.com/apahim/cls-backend/internal/database"
-	"github.com/apahim/cls-backend/internal/pubsub"
+	"github.com/apahim/cls-backend/internal/messaging"
 	"github.com/apahim/cls-backend/internal/utils"
 	"github.com/lib/pq"
 	"go.uber.org/zap"
@@ -36,7 +36,7 @@ func DefaultReactiveReconciliationConfig() *ReactiveReconciliationConfig {
 // ReactiveReconciler manages reactive reconciliation triggered by database changes
 type ReactiveReconciler struct {
 	repository       *database.Repository
-	publisher        *pubsub.Publisher
+	publisher        messaging.Publisher
 	dbConfig         *config.DatabaseConfig
 	config           *ReactiveReconciliationConfig
 	logger           *utils.Logger
@@ -66,7 +66,7 @@ type ReactiveReconcilerStats struct {
 }
 
 // NewReactiveReconciler creates a new reactive reconciler
-func NewReactiveReconciler(repository *database.Repository, publisher *pubsub.Publisher, dbConfig *config.DatabaseConfig, config *ReactiveReconciliationConfig) *ReactiveReconciler {
+func NewReactiveReconciler(repository *database.Repository, publisher messaging.Publisher, dbConfig *config.DatabaseConfig, config *ReactiveReconciliationConfig) *ReactiveReconciler {
 	if config == nil {
 		config = DefaultReactiveReconciliationConfig()
 	}

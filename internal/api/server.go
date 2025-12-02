@@ -8,8 +8,8 @@ import (
 
 	"github.com/apahim/cls-backend/internal/config"
 	"github.com/apahim/cls-backend/internal/database"
+	"github.com/apahim/cls-backend/internal/messaging"
 	"github.com/apahim/cls-backend/internal/middleware"
-	"github.com/apahim/cls-backend/internal/pubsub"
 	"github.com/apahim/cls-backend/internal/services"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -21,7 +21,7 @@ type Server struct {
 	router          *gin.Engine
 	logger          *zap.Logger
 	repository      *database.Repository
-	pubsub          *pubsub.Service
+	messaging       messaging.Provider
 	clusterService  *services.ClusterService
 	clusterHandler  *ClusterHandler
 	nodepoolHandler *NodePoolHandler
@@ -32,16 +32,16 @@ type Server struct {
 func NewServer(
 	cfg *config.Config,
 	repository *database.Repository,
-	pubsubService *pubsub.Service,
+	messagingProvider messaging.Provider,
 ) *Server {
 	logger := zap.L().Named("api_server")
 
 	// Initialize services
-	clusterService := services.NewClusterService(repository, pubsubService)
+	clusterService := services.NewClusterService(repository, messagingProvider)
 
 	// Initialize handlers
 	clusterHandler := NewClusterHandler(clusterService, repository.Status)
-	nodepoolHandler := NewNodePoolHandler(repository, pubsubService)
+	nodepoolHandler := NewNodePoolHandler(repository, messagingProvider)
 
 	// Setup router
 	router := setupRouter(cfg, clusterHandler, nodepoolHandler)
@@ -51,7 +51,7 @@ func NewServer(
 		router:          router,
 		logger:          logger,
 		repository:      repository,
-		pubsub:          pubsubService,
+		messaging:       messagingProvider,
 		clusterService:  clusterService,
 		clusterHandler:  clusterHandler,
 		nodepoolHandler: nodepoolHandler,

@@ -7,8 +7,8 @@ import (
 
 	"github.com/apahim/cls-backend/internal/auth"
 	"github.com/apahim/cls-backend/internal/database"
+	"github.com/apahim/cls-backend/internal/messaging"
 	"github.com/apahim/cls-backend/internal/models"
-	"github.com/apahim/cls-backend/internal/pubsub"
 	"github.com/apahim/cls-backend/internal/utils"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -17,15 +17,15 @@ import (
 // ClusterService provides business logic for cluster operations
 type ClusterService struct {
 	repository *database.Repository
-	pubsub     *pubsub.Service
+	messaging  messaging.Provider
 	logger     *utils.Logger
 }
 
 // NewClusterService creates a new cluster service
-func NewClusterService(repository *database.Repository, pubsubService *pubsub.Service) *ClusterService {
+func NewClusterService(repository *database.Repository, messagingProvider messaging.Provider) *ClusterService {
 	return &ClusterService{
 		repository: repository,
-		pubsub:     pubsubService,
+		messaging:  messagingProvider,
 		logger:     utils.NewLogger("cluster_service"),
 	}
 }
@@ -63,8 +63,8 @@ func (s *ClusterService) CreateCluster(ctx context.Context, req *models.ClusterC
 		}
 
 		// Publish cluster creation event
-		if s.pubsub != nil && s.pubsub.IsRunning() {
-			publisher := s.pubsub.GetPublisher()
+		if s.messaging != nil && s.messaging.IsRunning() {
+			publisher := s.messaging.GetPublisher().(messaging.Publisher)
 			if err := publisher.PublishClusterCreated(ctx, cluster); err != nil {
 				s.logger.Warn("Failed to publish cluster creation event",
 					zap.String("cluster_id", cluster.ID.String()),
@@ -274,8 +274,8 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, clusterID uuid.UUID,
 		}
 
 		// Publish cluster update event
-		if s.pubsub != nil && s.pubsub.IsRunning() {
-			publisher := s.pubsub.GetPublisher()
+		if s.messaging != nil && s.messaging.IsRunning() {
+			publisher := s.messaging.GetPublisher().(messaging.Publisher)
 			if err := publisher.PublishClusterUpdated(ctx, cluster); err != nil {
 				s.logger.Warn("Failed to publish cluster update event",
 					zap.String("cluster_id", cluster.ID.String()),
@@ -349,8 +349,8 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, clusterID uuid.UUID,
 		}
 
 		// Publish cluster deletion event
-		if s.pubsub != nil && s.pubsub.IsRunning() {
-			publisher := s.pubsub.GetPublisher()
+		if s.messaging != nil && s.messaging.IsRunning() {
+			publisher := s.messaging.GetPublisher().(messaging.Publisher)
 			if err := publisher.PublishClusterDeleted(ctx, cluster); err != nil {
 				s.logger.Warn("Failed to publish cluster deletion event",
 					zap.String("cluster_id", cluster.ID.String()),
@@ -517,8 +517,8 @@ func (s *ClusterService) UpdateClusterWithAccessControl(ctx context.Context, clu
 		}
 
 		// Publish cluster update event
-		if s.pubsub != nil && s.pubsub.IsRunning() {
-			publisher := s.pubsub.GetPublisher()
+		if s.messaging != nil && s.messaging.IsRunning() {
+			publisher := s.messaging.GetPublisher().(messaging.Publisher)
 			if err := publisher.PublishClusterUpdated(ctx, cluster); err != nil {
 				s.logger.Warn("Failed to publish cluster update event",
 					zap.String("cluster_id", cluster.ID.String()),
@@ -598,8 +598,8 @@ func (s *ClusterService) DeleteClusterWithAccessControl(ctx context.Context, clu
 		}
 
 		// Publish cluster deletion event
-		if s.pubsub != nil && s.pubsub.IsRunning() {
-			publisher := s.pubsub.GetPublisher()
+		if s.messaging != nil && s.messaging.IsRunning() {
+			publisher := s.messaging.GetPublisher().(messaging.Publisher)
 			if err := publisher.PublishClusterDeleted(ctx, cluster); err != nil {
 				s.logger.Warn("Failed to publish cluster deletion event",
 					zap.String("cluster_id", cluster.ID.String()),

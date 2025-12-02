@@ -10,7 +10,7 @@ import (
 	"github.com/apahim/cls-backend/internal/api"
 	"github.com/apahim/cls-backend/internal/config"
 	"github.com/apahim/cls-backend/internal/database"
-	"github.com/apahim/cls-backend/internal/pubsub"
+	"github.com/apahim/cls-backend/internal/messaging"
 	"github.com/apahim/cls-backend/internal/reconciliation"
 	"github.com/apahim/cls-backend/internal/utils"
 	"go.uber.org/zap"
@@ -47,20 +47,35 @@ func main() {
 	}
 	defer repo.Close()
 
-	// Initialize Pub/Sub service (publisher-only for fan-out architecture)
-	pubsubService, err := pubsub.NewService(cfg.PubSub)
+	// Initialize messaging service (supports both GCP Pub/Sub and AWS SNS+SQS)
+	messagingConfig, err := messaging.FromAppConfig(&cfg.Messaging)
 	if err != nil {
-		logger.Fatal("Failed to initialize Pub/Sub service", zap.Error(err))
+		logger.Fatal("Failed to convert messaging configuration", zap.Error(err))
 	}
-	defer pubsubService.Stop()
 
-	// Start Pub/Sub service
-	if err := pubsubService.Start(); err != nil {
-		logger.Fatal("Failed to start Pub/Sub service", zap.Error(err))
+	messagingProvider, err := messaging.NewProvider(messagingConfig)
+	if err != nil {
+		logger.Fatal("Failed to initialize messaging provider",
+			zap.String("provider", cfg.Messaging.Provider),
+			zap.Error(err))
 	}
+	defer messagingProvider.Stop()
+
+	// Start messaging service
+	if err := messagingProvider.Start(); err != nil {
+		logger.Fatal("Failed to start messaging service",
+			zap.String("provider", cfg.Messaging.Provider),
+			zap.Error(err))
+	}
+
+	logger.Info("Messaging provider initialized successfully",
+		zap.String("provider", cfg.Messaging.Provider))
+
+	// Get the publisher instance
+	publisher := messagingProvider.GetPublisher().(messaging.Publisher)
 
 	// Initialize and start reconciliation scheduler
-	scheduler := reconciliation.NewScheduler(repo, pubsubService.GetPublisher(), &cfg.Reconciliation)
+	scheduler := reconciliation.NewScheduler(repo, publisher, &cfg.Reconciliation)
 
 	ctx := context.Background()
 	if err := scheduler.Start(ctx); err != nil {
@@ -70,7 +85,7 @@ func main() {
 
 	// Initialize and start reactive reconciler (database change-driven reconciliation)
 	reactiveReconcilerConfig := reconciliation.DefaultReactiveReconciliationConfig()
-	reactiveReconciler := reconciliation.NewReactiveReconciler(repo, pubsubService.GetPublisher(), &cfg.Database, reactiveReconcilerConfig)
+	reactiveReconciler := reconciliation.NewReactiveReconciler(repo, publisher, &cfg.Database, reactiveReconcilerConfig)
 
 	if err := reactiveReconciler.Start(ctx); err != nil {
 		logger.Warn("Failed to start reactive reconciler", zap.Error(err))
@@ -85,7 +100,7 @@ func main() {
 	}()
 
 	// Initialize the simplified HTTP server
-	server := api.NewServer(cfg, repo, pubsubService)
+	server := api.NewServer(cfg, repo, messagingProvider)
 
 	// Start server with context
 	serverCtx, serverCancel := context.WithCancel(ctx)
